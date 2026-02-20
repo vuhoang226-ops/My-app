@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Thực Phẩm Pro v6</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #f0f2f5; padding: 15px; color: #333; }
+        h2 { font-size: 1.1rem; margin: 15px 0 10px 0; color: #2c3e50; border-left: 4px solid #27ae60; padding-left: 10px; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+        
+        .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .box { padding: 12px; border-radius: 10px; color: white; text-align: center; font-size: 0.9rem; }
+        .green { background: #2ecc71; } .purple { background: #9b59b6; }
+        
+        input { width: 100%; padding: 12px; margin: 5px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; font-size: 16px; outline: none; }
+        button { padding: 12px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        
+        .btn-primary { background: #27ae60; color: white; width: 100%; margin-top: 5px; }
+        .btn-edit-mode { background: #f1c40f !important; color: #333 !important; }
+        .btn-excel { background: #2c3e50; color: white; width: 100%; margin-bottom: 15px; }
+        
+        .search-container { position: sticky; top: 0; background: #f0f2f5; padding: 10px 0; z-index: 100; }
+        .warning-text { color: #e74c3c; font-weight: bold; }
+
+        .product-item { background: white; padding: 12px; border-radius: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .btn-sell { background: #e67e22; color: white; padding: 8px 12px; margin-left: 4px; }
+        .btn-edit { background: #ecf0f1; color: #2980b9; padding: 8px 12px; margin-left: 4px; }
+        .btn-delete { color: #e74c3c; background: none; font-size: 0.7rem; padding: 8px; }
+        .badge-warning { background: #fff3cd; color: #856404; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block; }
+    </style>
+</head>
+<body>
+
+    <h2>📊 Thống kê hôm nay</h2>
+    <div class="summary">
+        <div class="box green">Doanh thu: <br><b id="todaySales">0</b>đ</div>
+        <div class="box purple">Lợi nhuận: <br><b id="todayProfit">0</b>đ</div>
+    </div>
+    
+    <button class="btn-excel" onclick="exportToExcel()">📁 XUẤT EXCEL BÁO CÁO</button>
+
+    <h2 id="formTitle">➕ Nhập hàng mới</h2>
+    <div class="card">
+        <input type="text" id="name" placeholder="Tên sản phẩm">
+        <input type="number" id="importPrice" placeholder="Giá nhập (đ)">
+        <input type="number" id="exportPrice" placeholder="Giá bán (đ)">
+        <input type="number" id="quantity" placeholder="Số lượng">
+        <button id="submitBtn" class="btn-primary" onclick="handleAction()">THÊM VÀO KHO</button>
+        <button id="cancelBtn" style="display:none; background:none; color:grey; width:100%;" onclick="resetForm()">Hủy bỏ</button>
+    </div>
+
+    <div class="search-container">
+        <h2>📦 Danh sách sản phẩm</h2>
+        <input type="text" id="searchInput" placeholder="🔍 Tìm tên sản phẩm..." oninput="updateUI()">
+    </div>
+
+    <div id="productList"></div>
+
+    <script>
+        let inventory = JSON.parse(localStorage.getItem('myInventory')) || [];
+        let salesHistory = JSON.parse(localStorage.getItem('mySalesHistory')) || [];
+        let editingIndex = -1; // Biến theo dõi đang sửa mặt hàng nào
+
+        function getTodayStr() { return new Date().toLocaleDateString(); }
+
+        function updateUI() {
+            const list = document.getElementById('productList');
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            list.innerHTML = '';
+            
+            let tSales = 0, tProfit = 0;
+            const today = getTodayStr();
+
+            salesHistory.forEach(sale => {
+                if(sale.date === today) {
+                    tSales += sale.price;
+                    tProfit += sale.profit;
+                }
+            });
+
+            inventory.forEach((item, index) => {
+                if (item.name.toLowerCase().includes(searchTerm)) {
+                    const isLowStock = item.quantity <= 5;
+                    list.innerHTML += `
+                        <div class="product-item">
+                            <div class="info">
+                                <b>${item.name}</b><br>
+                                <small>Tồn: <span class="${isLowStock ? 'warning-text' : ''}">${item.quantity}</span> | Giá: ${item.exportPrice.toLocaleString()}đ</small>
+                                ${isLowStock ? '<br><span class="badge-warning">Sắp hết</span>' : ''}
+                            </div>
+                            <div class="actions">
+                                <button class="btn-sell" onclick="sellItem(${index})">Bán</button>
+                                <button class="btn-edit" onclick="editProduct(${index})">Sửa</button>
+                                <button class="btn-delete" onclick="deleteProduct(${index})">Xoá</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            document.getElementById('todaySales').innerText = tSales.toLocaleString();
+            document.getElementById('todayProfit').innerText = tProfit.toLocaleString();
+            localStorage.setItem('myInventory', JSON.stringify(inventory));
+            localStorage.setItem('mySalesHistory', JSON.stringify(salesHistory));
+        }
+
+        // Quyết định là Thêm mới hay Cập nhật
+        function handleAction() {
+            const data = {
+                name: document.getElementById('name').value,
+                importPrice: Number(document.getElementById('importPrice').value),
+                exportPrice: Number(document.getElementById('exportPrice').value),
+                quantity: Number(document.getElementById('quantity').value)
+            };
+
+            if(!data.name || data.importPrice < 0) return alert("Vui lòng nhập đúng thông tin");
+
+            if(editingIndex === -1) {
+                inventory.push(data);
+            } else {
+                inventory[editingIndex] = data;
+                resetForm();
+            }
+            updateUI();
+            clearInputs();
+        }
+
+        function editProduct(index) {
+            editingIndex = index;
+            const item = inventory[index];
+            document.getElementById('name').value = item.name;
+            document.getElementById('importPrice').value = item.importPrice;
+            document.getElementById('exportPrice').value = item.exportPrice;
+            document.getElementById('quantity').value = item.quantity;
+            
+            // Đổi trạng thái nút
+            document.getElementById('formTitle').innerText = "📝 Chỉnh sửa sản phẩm";
+            document.getElementById('submitBtn').innerText = "LƯU THAY ĐỔI";
+            document.getElementById('submitBtn').classList.add('btn-edit-mode');
+            document.getElementById('cancelBtn').style.display = "block";
+            window.scrollTo(0,0);
+        }
+
+        function resetForm() {
+            editingIndex = -1;
+            document.getElementById('formTitle').innerText = "➕ Nhập hàng mới";
+            document.getElementById('submitBtn').innerText = "THÊM VÀO KHO";
+            document.getElementById('submitBtn').classList.remove('btn-edit-mode');
+            document.getElementById('cancelBtn').style.display = "none";
+            clearInputs();
+        }
+
+        function clearInputs() {
+            document.querySelectorAll('input:not(#searchInput)').forEach(i => i.value = '');
+        }
+
+        function sellItem(index) {
+            if(inventory[index].quantity > 0) {
+                const item = inventory[index];
+                inventory[index].quantity -= 1;
+                salesHistory.push({
+                    date: getTodayStr(),
+                    time: new Date().toLocaleTimeString(),
+                    name: item.name,
+                    price: item.exportPrice,
+                    profit: item.exportPrice - item.importPrice
+                });
+                updateUI();
+            }
+        }
+
+        function deleteProduct(index) {
+            if(confirm("Xoá mặt hàng này?")) {
+                inventory.splice(index, 1);
+                updateUI();
+            }
+        }
+
+        function exportToExcel() {
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inventory), "Kho Hang");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesHistory), "Lich Su");
+            XLSX.writeFile(wb, `Bao_Cao_${getTodayStr().replace(/\//g,'-')}.xlsx`);
+        }
+
+        updateUI();
+    </script>
+</body>
+</html>
